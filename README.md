@@ -48,7 +48,7 @@ dependencyResolutionManagement {
 }
 
 dependencies {
-    implementation("app.convokit:convokit-android-ui:0.1.0")
+    implementation("app.convokit:convokit-android-ui:0.1.1")
 }
 ```
 
