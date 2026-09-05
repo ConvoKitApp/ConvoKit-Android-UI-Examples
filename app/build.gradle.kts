@@ -15,7 +15,6 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        buildConfigField("String", "CONVOKIT_API_URL", "\"https://convokit-backend.onrender.com\"")
         buildConfigField("String", "CONVOKIT_CLIENT_ID", "\"998da6ce-2572-42b1-8c60-734ce09c88e4\"")
         buildConfigField("String", "DEMO_BACKEND_URL", "\"https://convokit-open-chatroom.vercel.app\"")
     }
@@ -36,7 +35,7 @@ kotlin {
 }
 
 dependencies {
-    implementation("app.convokit:convokit-android-ui:0.1.1")
+    implementation("app.convokit:convokit-android-ui:0.1.2")
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.material3:material3")

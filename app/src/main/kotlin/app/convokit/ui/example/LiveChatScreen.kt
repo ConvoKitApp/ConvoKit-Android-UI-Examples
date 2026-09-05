@@ -51,7 +51,6 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
     val demoApi = remember { DemoApi() }
     val client = remember {
         ConvoKitClient(
-            backendUrl = BuildConfig.CONVOKIT_API_URL,
             clientId = BuildConfig.CONVOKIT_CLIENT_ID,
             tokenProvider = TokenProvider(demoApi::issueUserToken),
         )

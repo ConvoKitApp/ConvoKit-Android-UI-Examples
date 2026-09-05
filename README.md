@@ -48,12 +48,12 @@ dependencyResolutionManagement {
 }
 
 dependencies {
-    implementation("app.convokit:convokit-android-ui:0.1.1")
+    implementation("app.convokit:convokit-android-ui:0.1.2")
 }
 ```
 
 The UI artifact exposes the compatible core SDK transitively. An application
-may also declare `app.convokit:convokit-android:0.1.0` explicitly.
+may also declare `app.convokit:convokit-android:0.1.1` explicitly.
 
 ## Live room example
 
