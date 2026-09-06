@@ -39,6 +39,7 @@ import app.convokit.ui.components.DefaultComposer
 import app.convokit.ui.components.DefaultMediaBlock
 import app.convokit.ui.components.MessageItemContent
 import app.convokit.ui.components.ReadReceiptContent
+import app.convokit.ui.isConvoKitPending
 import app.convokit.ui.theme.ConvoKitTheme
 import app.convokit.ui.theme.ConvoKitUiColors
 import app.convokit.ui.theme.ConvoKitUiDimensions
@@ -232,7 +233,13 @@ private fun CompactMessage(message: Message, mine: Boolean, sender: String?, rea
                 if (!mine) Text(sender ?: message.senderId, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 message.text?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 message.media.forEach { media -> DefaultMediaBlock(media, message) }
-                if (mine) Text(if (readerCount > 0) "READ" else "SENT", style = MaterialTheme.typography.labelSmall, color = Color(0xFFAAD8CC))
+                if (mine) {
+                    Text(
+                        if (message.isConvoKitPending) "SENDING…" else if (readerCount > 0) "READ" else "SENT",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFAAD8CC),
+                    )
+                }
             }
         }
     }
