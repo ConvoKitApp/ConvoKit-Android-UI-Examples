@@ -64,7 +64,13 @@ token used by the Android SDK.
 
 Joining by room ID is intentionally application/backend logic, not a UI SDK
 component. Real products must decide who is allowed to join, how invite codes
-map to rooms, and how their users are authenticated. Once authorized, render:
+map to rooms, and how their users are authenticated.
+
+Once authorized, create the adapter **after** `connectUser()` succeeds. Retain it
+for that login and create a new one on every subsequent login, even when the
+public user ID is unchanged. Clear the chat UI on logout and disconnect the SDK
+when leaving the live example. `LiveChatScreen.kt` demonstrates this ownership.
+Then render:
 
 ```kotlin
 ConvoKitConversation(

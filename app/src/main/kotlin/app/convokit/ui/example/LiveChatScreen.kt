@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,6 +32,8 @@ import app.convokit.ui.client.DefaultConvoKitUiClient
 import app.convokit.ui.components.ConvoKitConversation
 import app.convokit.ui.theme.ConvoKitTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -55,16 +58,26 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
             tokenProvider = TokenProvider(demoApi::issueUserToken),
         )
     }
-    val uiClient = remember(client) { DefaultConvoKitUiClient(client) }
+    var uiClient by remember(client) { mutableStateOf<DefaultConvoKitUiClient?>(null) }
     var userId by remember { mutableStateOf("convokit_open_maya") }
     var roomId by remember { mutableStateOf("") }
     var connectedRoomId by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf("Enter a user ID and an existing chatroom ID.") }
     var busy by remember { mutableStateOf(false) }
 
+    DisposableEffect(client) {
+        onDispose {
+            // Composition cancellation must not cancel logout/provider cleanup.
+            scope.launch(NonCancellable) {
+                try { client.disconnectUser() } finally { demoApi.close() }
+            }
+        }
+    }
+
     ConvoKitTheme {
         val activeRoom = connectedRoomId
-        if (activeRoom == null) {
+        val activeClient = uiClient
+        if (activeRoom == null || activeClient == null) {
             Column(
                 modifier = Modifier.fillMaxSize().padding(systemPadding).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -79,6 +92,7 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
                     onValueChange = { userId = it },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Demo user ID") },
+                    enabled = !busy,
                     singleLine = true,
                 )
                 OutlinedTextField(
@@ -86,6 +100,7 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
                     onValueChange = { roomId = it },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Chatroom ID") },
+                    enabled = !busy,
                     singleLine = true,
                 )
                 Button(
@@ -98,20 +113,26 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
                             busy = true
                             status = "Connecting…"
                             scope.launch {
-                                runCatching {
+                                try {
                                     demoApi.joinChatroom(nextRoom, nextUser)
                                     client.connectUser(nextUser)
                                     client.getConversation(nextRoom)
-                                }.onSuccess {
+                                    // The adapter belongs to this login, not the reusable SDK object.
+                                    uiClient = DefaultConvoKitUiClient(client)
                                     connectedRoomId = nextRoom
                                     status = "Connected"
-                                }.onFailure { cause ->
+                                } catch (cause: Throwable) {
+                                    uiClient = null
+                                    connectedRoomId = null
+                                    withContext(NonCancellable) { client.disconnectUser() }
+                                    if (cause is CancellationException) throw cause
                                     status = when (cause) {
                                         is ConvoKitException -> cause.message ?: cause.code
                                         else -> cause.message ?: "Could not connect"
                                     }
+                                } finally {
+                                    busy = false
                                 }
-                                busy = false
                             }
                         }
                     },
@@ -124,12 +145,16 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
             }
         } else {
             ConvoKitConversation(
-                client = uiClient,
+                client = activeClient,
                 conversationId = activeRoom,
                 modifier = Modifier.fillMaxSize().padding(systemPadding),
                 onBack = {
                     connectedRoomId = null
-                    scope.launch { client.disconnectUser() }
+                    uiClient = null
+                    busy = true
+                    scope.launch {
+                        try { client.disconnectUser() } finally { busy = false }
+                    }
                 },
                 onAddAttachment = {
                     Toast.makeText(context, "Connect your app's file picker here", Toast.LENGTH_SHORT).show()
@@ -145,6 +170,12 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
 private class DemoApi {
     private val httpClient = OkHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
+
+    fun close() {
+        httpClient.dispatcher.cancelAll()
+        httpClient.connectionPool.evictAll()
+        httpClient.dispatcher.executorService.shutdown()
+    }
 
     suspend fun issueUserToken(appUserId: String): String {
         val response = postJson(
