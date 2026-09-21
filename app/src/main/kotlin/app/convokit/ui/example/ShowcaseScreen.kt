@@ -69,6 +69,10 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
     val spec = specFor(variant)
     var selected by remember(variant) { mutableStateOf(showcaseConversations.first()) }
     var messages by remember(variant) { mutableStateOf(showcaseMessages) }
+    // Edit mode is a pure function of this snapshot and the callbacks below: while it is set the
+    // package shows the banner, prefills the composer silently and routes the one submit handed
+    // to the default and custom composers to `onSaveEdit` instead of `onSendMessage`.
+    var editingMessage by remember(variant) { mutableStateOf<Message?>(null) }
     val context = LocalContext.current
     val imageBytes = remember { context.resources.openRawResource(R.raw.convokit_sample).use { it.readBytes() } }
     val imageLoader = remember(imageBytes) { ConvoKitImageLoader { imageBytes } }
@@ -150,7 +154,29 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
                             media = emptyList(),
                             createdAt = showcaseInstant(59),
                             updatedAt = null,
+                            revision = 0,
                         )
+                    },
+                    // The fixture stands in for the backend and the SDK-backed controller: the
+                    // package's default rows offer `Edit message` / `Delete message` to Maya's
+                    // confirmed rows because these callbacks are bound, and the composer saves
+                    // through `onSaveEdit`. A save lands on the row and bumps its `revision`,
+                    // which is what renders `Edited`; an empty save clears the caption of a row
+                    // that keeps an attachment (the package refuses it for text-only rows).
+                    editingMessage = editingMessage,
+                    onEditMessage = { editingMessage = it },
+                    onSaveEdit = { message, text, complete ->
+                        messages = messages.map { row ->
+                            if (row.id == message.id) row.copy(text = text.ifEmpty { null }, revision = row.revision + 1) else row
+                        }
+                        editingMessage = null
+                        complete(true)
+                    },
+                    onCancelEdit = { editingMessage = null },
+                    onDeleteMessage = { message, complete ->
+                        messages = messages.filterNot { it.id == message.id }
+                        if (editingMessage?.id == message.id) editingMessage = null
+                        complete(true)
                     },
                     readAtByUserId = mapOf("alex" to showcaseInstant(40)),
                     typingUserIds = if (variant == ShowcaseVariant.STANDARD) setOf("alex") else emptySet(),
@@ -174,8 +200,19 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
                     readReceiptContent = customReceipt,
                     composerContent = if (variant == ShowcaseVariant.BRANDED) {
                         { text, onTextChange, sending, send, attachment ->
+                            // The slot keeps its five parameters: `send` already saves while a
+                            // message is being edited, and the host passes its own edit state on
+                            // so the branded composer reads `Save` and allows an empty caption.
                             Surface(color = Color(0xFFF8F5FF)) {
-                                DefaultComposer(text, onTextChange, sending, send, attachment)
+                                DefaultComposer(
+                                    text,
+                                    onTextChange,
+                                    sending,
+                                    send,
+                                    attachment,
+                                    editing = editingMessage != null,
+                                    allowEmpty = editingMessage?.media?.isNotEmpty() == true,
+                                )
                             }
                         }
                     } else {
@@ -250,6 +287,12 @@ private fun BrandedConversationItem(conversation: Conversation, summary: InboxSu
     }
 }
 
+/**
+ * A complete row replacement. The `messageItem` slot keeps its five parameters, so the row
+ * derives the edited state from `Message.isEdited` (`revision > 0`) itself; the package's
+ * long-press actions belong to its default row, and a custom row supplies its own affordance
+ * (through `onController` in an SDK-backed host).
+ */
 @Composable
 private fun CompactMessage(message: Message, mine: Boolean, sender: String?, readerCount: Int) {
     Row(
@@ -265,12 +308,22 @@ private fun CompactMessage(message: Message, mine: Boolean, sender: String?, rea
                 if (!mine) Text(sender ?: message.senderId, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 message.text?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 message.media.forEach { media -> DefaultMediaBlock(media, message) }
-                if (mine) {
-                    Text(
-                        if (message.isConvoKitPending) "SENDING…" else if (readerCount > 0) "READ" else "SENT",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFFAAD8CC),
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (mine) {
+                        Text(
+                            if (message.isConvoKitPending) "SENDING…" else if (readerCount > 0) "READ" else "SENT",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFFAAD8CC),
+                        )
+                    }
+                    if (message.isEdited) {
+                        Text(
+                            "EDITED",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (mine) Color(0xFFAAD8CC) else Color(0xFF5F726C),
+                            modifier = Modifier.semantics { contentDescription = "Edited" },
+                        )
+                    }
                 }
             }
         }
@@ -280,7 +333,7 @@ private fun CompactMessage(message: Message, mine: Boolean, sender: String?, rea
 private fun specFor(variant: ShowcaseVariant): ShowcaseSpec = when (variant) {
     ShowcaseVariant.STANDARD -> ShowcaseSpec(
         title = "Standard components",
-        description = "Material 3 defaults with inbox previews, unread badges and the mark-unread dot, media, read receipts, typing state, pagination, and a text composer.",
+        description = "Material 3 defaults with inbox previews, unread badges and the mark-unread dot, media, read receipts, typing state, pagination, a text composer, and long-press edit and delete actions on your own messages.",
         props = listOf("defaults", "unread badges", "media"),
         colors = ConvoKitUiColors.light(),
     )

@@ -99,7 +99,8 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
                 Text(
                     "Room joining remains an application/backend concern; the reusable UI starts after the core SDK is connected. " +
                         "The joined room then appears in the SDK-backed inbox with its preview and unread badge, " +
-                        "and its row menu can mark it unread again.",
+                        "and its row menu can mark it unread again. Inside the room, long-press one of your own messages " +
+                        "to edit or delete it.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 OutlinedTextField(
@@ -208,6 +209,9 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
                 )
             }
         } else {
+            // The package's default rows and composer carry the 0.8.0 edit and delete surface: own
+            // confirmed rows offer a long-press menu while the session's role allows it, deletes
+            // confirm through the built-in dialog, and the composer saves with the snapshot revision.
             ConvoKitConversation(
                 client = activeClient,
                 conversationId = activeRoom,

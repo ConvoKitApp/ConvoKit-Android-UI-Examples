@@ -19,6 +19,11 @@ internal val showcaseConversations = listOf(
     conversation("launch", "Launch room", "Release coordination", 18, "sam" to "Sam Patel", "alex" to "Alex Rivera"),
 )
 
+/**
+ * The room's history. Every row carries the core's `revision` (0 on creation, +1 per edit);
+ * `m2` is Maya's own edited row (`revision` 1), so the default row and the compact custom row
+ * both show `Edited`, and its attachment keeps `Save` enabled while the caption is cleared.
+ */
 internal val showcaseMessages = listOf(
     message("m1", "alex", "The updated empty state is ready for review.", 22),
     message(
@@ -27,6 +32,7 @@ internal val showcaseMessages = listOf(
         "Looks good. I tightened the copy and spacing.",
         24,
         listOf(ContactMedia(name = "Jordan Lee", email = "jordan@example.com")),
+        revision = 1,
     ),
     message("m3", "alex", "Perfect—adding it to the release notes.", 26),
     message(
@@ -126,6 +132,7 @@ internal fun message(
     minute: Int,
     media: List<app.convokit.sdk.MessageMedia> = emptyList(),
     conversationId: String = "design",
+    revision: Int = 0,
 ): Message = Message(
     id = id,
     conversationId = conversationId,
@@ -134,6 +141,7 @@ internal fun message(
     media = media,
     createdAt = showcaseInstant(minute),
     updatedAt = null,
+    revision = revision,
 )
 
 internal fun showcaseInstant(minute: Int): Instant =
