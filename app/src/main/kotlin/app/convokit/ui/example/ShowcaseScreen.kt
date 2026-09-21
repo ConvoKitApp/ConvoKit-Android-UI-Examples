@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.MaterialTheme
@@ -26,6 +28,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -101,7 +105,7 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
                 spec.props.take(3).forEach { prop -> AssistChip(onClick = {}, label = { Text(prop) }) }
             }
             Surface(
-                // Tall enough for all three showcase rows (read, unread, and capped `99+`) without scrolling.
+                // Tall enough for all three showcase rows (marked-unread dot, unread, and capped `99+`) without scrolling.
                 modifier = Modifier.fillMaxWidth().height(if (variant == ShowcaseVariant.COMPACT) 210.dp else 268.dp),
                 shape = RoundedCornerShape(18.dp),
                 color = spec.colors.surface,
@@ -205,8 +209,9 @@ private fun BrandedHeader(title: String, onRefresh: () -> Unit) {
 @Composable
 private fun BrandedConversationItem(conversation: Conversation, summary: InboxSummary?, onClick: () -> Unit) {
     // The inbox summary carries the latest message and unread state; the row only presents them.
+    // `isUnread` also covers the user's private "mark unread" marker, which never invents a count.
     val detail = summary?.latestMessage?.text?.takeIf(String::isNotBlank) ?: conversation.description.orEmpty()
-    val unread = summary?.takeIf { it.unreadCount > 0 || it.unreadCountCapped }
+    val unread = summary?.takeIf { it.isUnread || it.unreadCount > 0 || it.unreadCountCapped }
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -224,12 +229,22 @@ private fun BrandedConversationItem(conversation: Conversation, summary: InboxSu
             }
             if (unread != null) {
                 Spacer(Modifier.width(10.dp))
-                Text(
-                    "${unread.unreadCount}${if (unread.unreadCountCapped) "+" else ""} new",
-                    color = Color(0xFF68479D),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                )
+                if (unread.unreadCount > 0 || unread.unreadCountCapped) {
+                    Text(
+                        "${unread.unreadCount}${if (unread.unreadCountCapped) "+" else ""} new",
+                        color = Color(0xFF68479D),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                } else {
+                    // Marked unread without unread messages: a dot, never "0 new".
+                    Box(
+                        Modifier
+                            .semantics { contentDescription = "Unread" }
+                            .size(8.dp)
+                            .background(Color(0xFF68479D), CircleShape),
+                    )
+                }
             }
         }
     }
@@ -265,7 +280,7 @@ private fun CompactMessage(message: Message, mine: Boolean, sender: String?, rea
 private fun specFor(variant: ShowcaseVariant): ShowcaseSpec = when (variant) {
     ShowcaseVariant.STANDARD -> ShowcaseSpec(
         title = "Standard components",
-        description = "Material 3 defaults with inbox previews, unread badges, media, read receipts, typing state, pagination, and a text composer.",
+        description = "Material 3 defaults with inbox previews, unread badges and the mark-unread dot, media, read receipts, typing state, pagination, and a text composer.",
         props = listOf("defaults", "unread badges", "media"),
         colors = ConvoKitUiColors.light(),
     )

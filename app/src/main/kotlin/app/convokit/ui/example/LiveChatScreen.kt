@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -25,14 +28,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.convokit.sdk.Conversation
 import app.convokit.sdk.ConvoKitClient
 import app.convokit.sdk.ConvoKitException
+import app.convokit.sdk.InboxSummary
 import app.convokit.sdk.TokenProvider
 import app.convokit.ui.client.DefaultConvoKitUiClient
 import app.convokit.ui.components.ConvoKitConversation
 import app.convokit.ui.components.ConvoKitConversationList
+import app.convokit.ui.components.DefaultConversationItem
+import app.convokit.ui.controller.ConvoKitConversationListController
 import app.convokit.ui.theme.ConvoKitTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -89,7 +98,8 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
                 Text("Live SDK example", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                 Text(
                     "Room joining remains an application/backend concern; the reusable UI starts after the core SDK is connected. " +
-                        "The joined room then appears in the SDK-backed inbox with its preview and unread badge.",
+                        "The joined room then appears in the SDK-backed inbox with its preview and unread badge, " +
+                        "and its row menu can mark it unread again.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 OutlinedTextField(
@@ -151,6 +161,9 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
                 if (busy) Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             }
         } else if (activeRoom == null) {
+            // The package ships no "mark unread" row affordance: the list hands its controller to the
+            // host through `onController`, and the row menu below calls `markUnread` on it.
+            var listController by remember(activeClient) { mutableStateOf<ConvoKitConversationListController?>(null) }
             Column(modifier = Modifier.fillMaxSize().padding(systemPadding)) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
@@ -177,11 +190,21 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
                     }
                 }
                 // The released package pages the inbox itself: each row's preview, activity time and
-                // unread badge come from the SDK, and live activity keeps them fresh.
+                // unread badge or mark-unread dot come from the SDK, and live activity keeps them fresh.
                 ConvoKitConversationList(
                     client = activeClient,
                     onConversationSelected = { openRoomId = it.id },
                     modifier = Modifier.weight(1f),
+                    onController = { listController = it },
+                    inboxItem = { conversation, summary, _, onClick ->
+                        LiveInboxRow(
+                            conversation = conversation,
+                            summary = summary,
+                            currentUserId = connectedUserId,
+                            onClick = onClick,
+                            onMarkUnread = { scope.launch { listController?.markUnread(conversation.id) } },
+                        )
+                    },
                 )
             }
         } else {
@@ -197,6 +220,49 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
                     Toast.makeText(context, media.name ?: "Attachment", Toast.LENGTH_SHORT).show()
                 },
             )
+        }
+    }
+}
+
+/**
+ * The package's default row (preview, activity time, numeric badge or the private-marker dot)
+ * beside a per-row menu. "Mark unread" calls `ConvoKitConversationListController.markUnread`,
+ * which marks the room for this user only and patches the row's summary so the dot shows at
+ * once; opening the room later clears the marker through the room's own acknowledgements.
+ */
+@Composable
+private fun LiveInboxRow(
+    conversation: Conversation,
+    summary: InboxSummary?,
+    currentUserId: String?,
+    onClick: () -> Unit,
+    onMarkUnread: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        DefaultConversationItem(
+            conversation = conversation,
+            onClick = onClick,
+            modifier = Modifier.weight(1f),
+            summary = summary,
+            currentUserId = currentUserId,
+        )
+        Box {
+            IconButton(
+                onClick = { menuOpen = true },
+                modifier = Modifier.semantics { contentDescription = "Conversation actions" },
+            ) {
+                Text("\u22EE", style = MaterialTheme.typography.titleMedium)
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Mark unread") },
+                    onClick = {
+                        menuOpen = false
+                        onMarkUnread()
+                    },
+                )
+            }
         }
     }
 }

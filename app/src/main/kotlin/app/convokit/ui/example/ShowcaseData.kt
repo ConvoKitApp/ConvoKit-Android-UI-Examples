@@ -54,7 +54,9 @@ internal val showcaseMessages = listOf(
 
 /**
  * The inbox state a `listInbox` page would carry for [showcaseConversations]: the default row
- * derives the preview line, the activity time and the unread badge from these values.
+ * derives the preview line, the activity time and the unread badge from these values. `design`
+ * is fully read but carries Maya's private "mark unread" marker (`isUnread` with a zero count),
+ * so its row shows the numberless dot; `support` and `launch` keep the numeric and capped badges.
  */
 internal val showcaseSummaries: Map<String, InboxSummary> = mapOf(
     "design" to InboxSummary(
@@ -63,6 +65,9 @@ internal val showcaseSummaries: Map<String, InboxSummary> = mapOf(
         readPosition = ReadPosition(messageId = "m6", createdAt = showcaseInstant(32)),
         lastReadAt = showcaseInstant(33),
         activityAt = showcaseInstant(32),
+        unreadMarkedAt = showcaseInstant(35),
+        privateStateVersion = 1,
+        isUnread = true,
     ),
     "support" to InboxSummary(
         latestMessage = message("s1", "taylor", "The fix is live", 27, conversationId = "support"),
