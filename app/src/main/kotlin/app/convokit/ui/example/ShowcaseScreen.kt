@@ -29,14 +29,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.convokit.sdk.Conversation
+import app.convokit.sdk.InboxSummary
 import app.convokit.sdk.Message
 import app.convokit.ui.components.ConvoKitConversationListView
 import app.convokit.ui.components.ConvoKitConversationView
 import app.convokit.ui.components.ConvoKitImageLoader
 import app.convokit.ui.components.ConversationHeaderContent
-import app.convokit.ui.components.ConversationItemContent
 import app.convokit.ui.components.DefaultComposer
 import app.convokit.ui.components.DefaultMediaBlock
+import app.convokit.ui.components.InboxItemContent
 import app.convokit.ui.components.MessageItemContent
 import app.convokit.ui.components.ReadReceiptContent
 import app.convokit.ui.isConvoKitPending
@@ -72,8 +74,8 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
     } else {
         null
     }
-    val customConversationItem: ConversationItemContent? = if (variant == ShowcaseVariant.BRANDED) {
-        { conversation, _, onClick -> BrandedConversationItem(conversation.displayTitle, conversation.description.orEmpty(), onClick) }
+    val customInboxItem: InboxItemContent? = if (variant == ShowcaseVariant.BRANDED) {
+        { conversation, summary, _, onClick -> BrandedConversationItem(conversation, summary, onClick) }
     } else {
         null
     }
@@ -99,7 +101,8 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
                 spec.props.take(3).forEach { prop -> AssistChip(onClick = {}, label = { Text(prop) }) }
             }
             Surface(
-                modifier = Modifier.fillMaxWidth().height(if (variant == ShowcaseVariant.COMPACT) 156.dp else 190.dp),
+                // Tall enough for all three showcase rows (read, unread, and capped `99+`) without scrolling.
+                modifier = Modifier.fillMaxWidth().height(if (variant == ShowcaseVariant.COMPACT) 210.dp else 268.dp),
                 shape = RoundedCornerShape(18.dp),
                 color = spec.colors.surface,
                 tonalElevation = 2.dp,
@@ -113,12 +116,14 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     )
                     ConvoKitConversationListView(
-                        conversations = showcaseConversations.take(2),
+                        conversations = showcaseConversations,
                         onConversationSelected = { selected = it },
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                         itemSpacing = if (variant == ShowcaseVariant.COMPACT) 4.dp else 8.dp,
-                        conversationItem = customConversationItem,
+                        summaries = showcaseSummaries,
+                        currentUserId = currentUserId,
+                        inboxItem = customInboxItem,
                     )
                 }
             }
@@ -198,7 +203,10 @@ private fun BrandedHeader(title: String, onRefresh: () -> Unit) {
 }
 
 @Composable
-private fun BrandedConversationItem(title: String, detail: String, onClick: () -> Unit) {
+private fun BrandedConversationItem(conversation: Conversation, summary: InboxSummary?, onClick: () -> Unit) {
+    // The inbox summary carries the latest message and unread state; the row only presents them.
+    val detail = summary?.latestMessage?.text?.takeIf(String::isNotBlank) ?: conversation.description.orEmpty()
+    val unread = summary?.takeIf { it.unreadCount > 0 || it.unreadCountCapped }
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -211,8 +219,17 @@ private fun BrandedConversationItem(title: String, detail: String, onClick: () -
             )
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(conversation.displayTitle, fontWeight = FontWeight.Bold, maxLines = 1)
                 Text(detail, color = Color(0xFF746B82), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (unread != null) {
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "${unread.unreadCount}${if (unread.unreadCountCapped) "+" else ""} new",
+                    color = Color(0xFF68479D),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
     }
@@ -248,19 +265,20 @@ private fun CompactMessage(message: Message, mine: Boolean, sender: String?, rea
 private fun specFor(variant: ShowcaseVariant): ShowcaseSpec = when (variant) {
     ShowcaseVariant.STANDARD -> ShowcaseSpec(
         title = "Standard components",
-        description = "Material 3 defaults with media, read receipts, typing state, pagination, and a text composer.",
-        props = listOf("defaults", "read receipts", "media"),
+        description = "Material 3 defaults with inbox previews, unread badges, media, read receipts, typing state, pagination, and a text composer.",
+        props = listOf("defaults", "unread badges", "media"),
         colors = ConvoKitUiColors.light(),
     )
     ShowcaseVariant.BRANDED -> ShowcaseSpec(
         title = "Branded support",
         description = "The same components configured through color tokens and targeted content slots.",
-        props = listOf("theme tokens", "header slot", "media slot"),
+        props = listOf("theme tokens", "inbox slot", "media slot"),
         colors = ConvoKitUiColors.light().copy(
             primary = Color(0xFF68479D),
             outgoingBubble = Color(0xFF68479D),
             readReceipt = Color(0xFFE0D0FF),
             background = Color(0xFFF5F1FA),
+            badge = Color(0xFF68479D),
         ),
     )
     ShowcaseVariant.COMPACT -> ShowcaseSpec(
@@ -270,6 +288,7 @@ private fun specFor(variant: ShowcaseVariant): ShowcaseSpec = when (variant) {
         colors = ConvoKitUiColors.light().copy(
             primary = Color(0xFF284A40),
             outgoingBubble = Color(0xFF263A35),
+            badge = Color(0xFF284A40),
         ),
         dimensions = ConvoKitUiDimensions(
             cornerRadius = 10.dp,

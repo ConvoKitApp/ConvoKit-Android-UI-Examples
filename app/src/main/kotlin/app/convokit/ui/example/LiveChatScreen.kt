@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -13,6 +14,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -30,6 +32,7 @@ import app.convokit.sdk.ConvoKitException
 import app.convokit.sdk.TokenProvider
 import app.convokit.ui.client.DefaultConvoKitUiClient
 import app.convokit.ui.components.ConvoKitConversation
+import app.convokit.ui.components.ConvoKitConversationList
 import app.convokit.ui.theme.ConvoKitTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -61,7 +64,8 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
     var uiClient by remember(client) { mutableStateOf<DefaultConvoKitUiClient?>(null) }
     var userId by remember { mutableStateOf("convokit_open_maya") }
     var roomId by remember { mutableStateOf("") }
-    var connectedRoomId by remember { mutableStateOf<String?>(null) }
+    var connectedUserId by remember { mutableStateOf<String?>(null) }
+    var openRoomId by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf("Enter a user ID and an existing chatroom ID.") }
     var busy by remember { mutableStateOf(false) }
 
@@ -75,16 +79,17 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
     }
 
     ConvoKitTheme {
-        val activeRoom = connectedRoomId
         val activeClient = uiClient
-        if (activeRoom == null || activeClient == null) {
+        val activeRoom = openRoomId
+        if (activeClient == null) {
             Column(
                 modifier = Modifier.fillMaxSize().padding(systemPadding).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text("Live SDK example", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                 Text(
-                    "Room joining remains an application/backend concern; the reusable UI starts after the core SDK is connected.",
+                    "Room joining remains an application/backend concern; the reusable UI starts after the core SDK is connected. " +
+                        "The joined room then appears in the SDK-backed inbox with its preview and unread badge.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 OutlinedTextField(
@@ -119,11 +124,13 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
                                     client.getConversation(nextRoom)
                                     // The adapter belongs to this login, not the reusable SDK object.
                                     uiClient = DefaultConvoKitUiClient(client)
-                                    connectedRoomId = nextRoom
+                                    connectedUserId = nextUser
+                                    openRoomId = null
                                     status = "Connected"
                                 } catch (cause: Throwable) {
                                     uiClient = null
-                                    connectedRoomId = null
+                                    connectedUserId = null
+                                    openRoomId = null
                                     withContext(NonCancellable) { client.disconnectUser() }
                                     if (cause is CancellationException) throw cause
                                     status = when (cause) {
@@ -143,19 +150,46 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
                 Text(status, style = MaterialTheme.typography.bodySmall)
                 if (busy) Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             }
+        } else if (activeRoom == null) {
+            Column(modifier = Modifier.fillMaxSize().padding(systemPadding)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Inbox", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                        Text("Signed in as ${connectedUserId.orEmpty()}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    TextButton(
+                        onClick = {
+                            openRoomId = null
+                            connectedUserId = null
+                            uiClient = null
+                            busy = true
+                            status = "Signed out."
+                            scope.launch {
+                                try { client.disconnectUser() } finally { busy = false }
+                            }
+                        },
+                        enabled = !busy,
+                    ) {
+                        Text("Log out")
+                    }
+                }
+                // The released package pages the inbox itself: each row's preview, activity time and
+                // unread badge come from the SDK, and live activity keeps them fresh.
+                ConvoKitConversationList(
+                    client = activeClient,
+                    onConversationSelected = { openRoomId = it.id },
+                    modifier = Modifier.weight(1f),
+                )
+            }
         } else {
             ConvoKitConversation(
                 client = activeClient,
                 conversationId = activeRoom,
                 modifier = Modifier.fillMaxSize().padding(systemPadding),
-                onBack = {
-                    connectedRoomId = null
-                    uiClient = null
-                    busy = true
-                    scope.launch {
-                        try { client.disconnectUser() } finally { busy = false }
-                    }
-                },
+                onBack = { openRoomId = null },
                 onAddAttachment = {
                     Toast.makeText(context, "Connect your app's file picker here", Toast.LENGTH_SHORT).show()
                 },

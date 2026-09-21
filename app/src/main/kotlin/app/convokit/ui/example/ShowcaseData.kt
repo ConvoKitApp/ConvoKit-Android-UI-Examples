@@ -4,17 +4,19 @@ import app.convokit.sdk.ContactMedia
 import app.convokit.sdk.Conversation
 import app.convokit.sdk.FileMedia
 import app.convokit.sdk.ImageMedia
+import app.convokit.sdk.InboxSummary
 import app.convokit.sdk.LocationMedia
 import app.convokit.sdk.Message
 import app.convokit.sdk.Participant
+import app.convokit.sdk.ReadPosition
 import kotlinx.datetime.Instant
 
 internal const val currentUserId = "maya"
 
 internal val showcaseConversations = listOf(
-    conversation("design", "Design review", "Alex shared an image", 34, "alex", "Alex Rivera"),
-    conversation("support", "Customer support", "Taylor: The fix is live", 27, "taylor", "Taylor Kim"),
-    conversation("launch", "Launch room", "Sam: Checklist attached", 18, "sam", "Sam Patel"),
+    conversation("design", "Design review", "Weekly component review", 34, "alex" to "Alex Rivera"),
+    conversation("support", "Customer support", "Tier 2 escalations", 27, "taylor" to "Taylor Kim", "jordan" to "Jordan Lee"),
+    conversation("launch", "Launch room", "Release coordination", 18, "sam" to "Sam Patel", "alex" to "Alex Rivera"),
 )
 
 internal val showcaseMessages = listOf(
@@ -50,13 +52,46 @@ internal val showcaseMessages = listOf(
     ),
 )
 
+/**
+ * The inbox state a `listInbox` page would carry for [showcaseConversations]: the default row
+ * derives the preview line, the activity time and the unread badge from these values.
+ */
+internal val showcaseSummaries: Map<String, InboxSummary> = mapOf(
+    "design" to InboxSummary(
+        latestMessage = showcaseMessages.last(),
+        unreadCount = 0,
+        readPosition = ReadPosition(messageId = "m6", createdAt = showcaseInstant(32)),
+        lastReadAt = showcaseInstant(33),
+        activityAt = showcaseInstant(32),
+    ),
+    "support" to InboxSummary(
+        latestMessage = message("s1", "taylor", "The fix is live", 27, conversationId = "support"),
+        unreadCount = 2,
+        readPosition = ReadPosition(messageId = "s0", createdAt = showcaseInstant(20)),
+        lastReadAt = showcaseInstant(21),
+        activityAt = showcaseInstant(27),
+    ),
+    "launch" to InboxSummary(
+        latestMessage = message(
+            "l1",
+            "sam",
+            null,
+            18,
+            listOf(FileMedia(url = "fixture://checklist", name = "checklist.pdf", size = 120_400)),
+            conversationId = "launch",
+        ),
+        unreadCount = 1000,
+        unreadCountCapped = true,
+        activityAt = showcaseInstant(18),
+    ),
+)
+
 internal fun conversation(
     id: String,
     title: String,
     description: String,
     minute: Int,
-    partnerId: String,
-    partnerName: String,
+    vararg partners: Pair<String, String>,
 ): Conversation = Conversation(
     id = id,
     title = title,
@@ -64,10 +99,8 @@ internal fun conversation(
     appId = "showcase",
     displayTitle = title,
     description = description,
-    participants = listOf(
-        participant(currentUserId, "Maya Chen", 32),
-        participant(partnerId, partnerName, 33),
-    ),
+    participants = listOf(participant(currentUserId, "Maya Chen", 32)) +
+        partners.map { (partnerId, partnerName) -> participant(partnerId, partnerName, 33) },
     createdAt = showcaseInstant(0),
     updatedAt = showcaseInstant(minute),
 )
@@ -87,9 +120,10 @@ internal fun message(
     text: String?,
     minute: Int,
     media: List<app.convokit.sdk.MessageMedia> = emptyList(),
+    conversationId: String = "design",
 ): Message = Message(
     id = id,
-    conversationId = "design",
+    conversationId = conversationId,
     senderId = senderId,
     text = text,
     media = media,

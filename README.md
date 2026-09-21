@@ -15,13 +15,20 @@ implementation stays in its private source repository.
 
 The app includes four navigable examples:
 
-- **Standard** uses the Material 3 defaults with media, read receipts, typing,
-  pagination, and the composer.
-- **Branded** applies a custom palette and replaces the list row, header, media
-  wrapper, read receipt, and composer styling.
+- **Standard** uses the Material 3 defaults with inbox previews, unread badges,
+  media, read receipts, typing, pagination, and the composer.
+- **Branded** applies a custom palette and replaces the list row (through the
+  `inboxItem` slot, reading each row's `InboxSummary`), header, media wrapper,
+  read receipt, and composer styling.
 - **Compact** changes sizing tokens and replaces the complete message row.
 - **Live** connects the real SDK, joins a room through an application backend,
-  and renders the SDK-backed conversation component.
+  and renders the SDK-backed inbox list (previews, activity times, and unread
+  badges come from the package) before the SDK-backed conversation component.
+
+The showcase screens pass real `InboxSummary` values to the controlled
+`ConvoKitConversationListView` through its `summaries` and `currentUserId`
+parameters, so the default row derives the preview line, the `activityAt` time
+and the unread badge exactly as an SDK-backed list would.
 
 ## Run
 
@@ -48,12 +55,12 @@ dependencyResolutionManagement {
 }
 
 dependencies {
-    implementation("app.convokit:convokit-android-ui:0.5.0")
+    implementation("app.convokit:convokit-android-ui:0.6.0")
 }
 ```
 
 The UI artifact exposes the compatible core SDK transitively. An application
-may also declare `app.convokit:convokit-android:0.5.0` explicitly.
+may also declare `app.convokit:convokit-android:0.6.0` explicitly.
 
 ## Live room example
 
@@ -70,13 +77,17 @@ Once authorized, create the adapter **after** `connectUser()` succeeds. Retain i
 for that login and create a new one on every subsequent login, even when the
 public user ID is unchanged. Clear the chat UI on logout and disconnect the SDK
 when leaving the live example. `LiveChatScreen.kt` demonstrates this ownership.
-Then render:
+Then render the SDK-backed inbox, which pages `listInbox` itself and shows each
+room's preview, activity time and unread badge, and open the selected room:
 
 ```kotlin
-ConvoKitConversation(
-    client = DefaultConvoKitUiClient(connectedSdk),
-    conversationId = joinedRoomId,
-)
+val uiClient = DefaultConvoKitUiClient(connectedSdk)
+var openRoomId by remember { mutableStateOf<String?>(null) }
+
+when (val id = openRoomId) {
+    null -> ConvoKitConversationList(client = uiClient, onConversationSelected = { openRoomId = it.id })
+    else -> ConvoKitConversation(client = uiClient, conversationId = id, onBack = { openRoomId = null })
+}
 ```
 
 The client ID is public. Never put a ConvoKit client secret in an APK,
