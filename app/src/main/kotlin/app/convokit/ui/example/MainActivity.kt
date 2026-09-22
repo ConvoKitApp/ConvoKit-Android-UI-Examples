@@ -22,6 +22,7 @@ internal enum class ExampleScreen(val label: String) {
     STANDARD("Standard"),
     BRANDED("Branded"),
     COMPACT("Compact"),
+    QUOTED("Quoted"),
     LIVE("Live"),
 }
 
@@ -56,6 +57,7 @@ internal fun ConvoKitAndroidUiExample() {
                     ExampleScreen.STANDARD -> ShowcaseScreen(ShowcaseVariant.STANDARD, contentPadding)
                     ExampleScreen.BRANDED -> ShowcaseScreen(ShowcaseVariant.BRANDED, contentPadding)
                     ExampleScreen.COMPACT -> ShowcaseScreen(ShowcaseVariant.COMPACT, contentPadding)
+                    ExampleScreen.QUOTED -> ShowcaseScreen(ShowcaseVariant.QUOTED, contentPadding)
                     ExampleScreen.LIVE -> LiveChatScreen(contentPadding)
                 }
             }

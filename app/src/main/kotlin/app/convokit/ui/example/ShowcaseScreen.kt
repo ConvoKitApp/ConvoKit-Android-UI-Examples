@@ -1,6 +1,7 @@
 package app.convokit.ui.example
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,7 +20,9 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,9 +39,12 @@ import androidx.compose.ui.unit.dp
 import app.convokit.sdk.Conversation
 import app.convokit.sdk.InboxSummary
 import app.convokit.sdk.Message
+import app.convokit.ui.ConvoKitReplyPreview
+import app.convokit.ui.ConvoKitWindowMode
 import app.convokit.ui.components.ConvoKitConversationListView
 import app.convokit.ui.components.ConvoKitConversationView
 import app.convokit.ui.components.ConvoKitImageLoader
+import app.convokit.ui.components.ConvoKitMessageItemScope
 import app.convokit.ui.components.ConversationHeaderContent
 import app.convokit.ui.components.DefaultComposer
 import app.convokit.ui.components.DefaultMediaBlock
@@ -49,11 +55,13 @@ import app.convokit.ui.isConvoKitPending
 import app.convokit.ui.theme.ConvoKitTheme
 import app.convokit.ui.theme.ConvoKitUiColors
 import app.convokit.ui.theme.ConvoKitUiDimensions
+import kotlinx.coroutines.delay
 
 internal enum class ShowcaseVariant {
     STANDARD,
     BRANDED,
     COMPACT,
+    QUOTED,
 }
 
 private data class ShowcaseSpec(
@@ -68,11 +76,21 @@ private data class ShowcaseSpec(
 internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValues) {
     val spec = specFor(variant)
     var selected by remember(variant) { mutableStateOf(showcaseConversations.first()) }
-    var messages by remember(variant) { mutableStateOf(showcaseMessages) }
-    // Edit mode is a pure function of this snapshot and the callbacks below: while it is set the
-    // package shows the banner, prefills the composer silently and routes the one submit handed
-    // to the default and custom composers to `onSaveEdit` instead of `onSendMessage`.
-    var editingMessage by remember(variant) { mutableStateOf<Message?>(null) }
+    // One fixture room stands in for the SDK-backed controller the Live tab gets: the loaded
+    // window over a longer history, edit mode, the reply target, the quoted previews and the
+    // jumped-window mode are all host state here, and the controlled view below is a pure function
+    // of them and its callbacks. Edit mode has worked that way since 0.8.0: while `editingMessage`
+    // is set the package shows the banner, prefills the composer silently and routes the one
+    // submit handed to the default and custom composers to `onSaveEdit` instead of `onSendMessage`.
+    var room by remember(variant) { mutableStateOf(ShowcaseRoom()) }
+    // The highlight belongs to whoever owns the state, so a controlled host clears it itself; the
+    // package's own controller clears its own after about two seconds.
+    LaunchedEffect(room.highlightedMessageId) {
+        if (room.highlightedMessageId != null) {
+            delay(2_000)
+            room = room.clearHighlight()
+        }
+    }
     val context = LocalContext.current
     val imageBytes = remember { context.resources.openRawResource(R.raw.convokit_sample).use { it.readBytes() } }
     val imageLoader = remember(imageBytes) { ConvoKitImageLoader { imageBytes } }
@@ -89,6 +107,15 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
     }
     val customMessage: MessageItemContent? = if (variant == ShowcaseVariant.COMPACT) {
         { message, _, mine, sender, readers -> CompactMessage(message, mine, sender?.name, readers.size) }
+    } else {
+        null
+    }
+    // `messageItem` above keeps its five parameters for ever. A row that needs the 0.9.0 reply
+    // members takes the `messageItemScope` slot instead, which carries those five unchanged plus
+    // the quoted preview, the reply action, the jump target and the highlight; supplying both on
+    // one view is allowed and the scope wins.
+    val scopedMessage: (@Composable (ConvoKitMessageItemScope) -> Unit)? = if (variant == ShowcaseVariant.QUOTED) {
+        { scope -> QuotedMessage(scope) }
     } else {
         null
     }
@@ -143,44 +170,49 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
             ) {
                 ConvoKitConversationView(
                     conversation = selected,
-                    messages = messages,
+                    messages = room.messages,
                     currentUserId = currentUserId,
-                    onSendMessage = { text ->
-                        messages = messages + Message(
-                            id = "local-${messages.size}",
-                            conversationId = selected.id,
-                            senderId = currentUserId,
-                            text = text,
-                            media = emptyList(),
-                            createdAt = showcaseInstant(59),
-                            updatedAt = null,
-                            revision = 0,
-                        )
-                    },
+                    onSendMessage = { text -> room = room.send(text, selected.id) },
                     // The fixture stands in for the backend and the SDK-backed controller: the
                     // package's default rows offer `Edit message` / `Delete message` to Maya's
                     // confirmed rows because these callbacks are bound, and the composer saves
                     // through `onSaveEdit`. A save lands on the row and bumps its `revision`,
                     // which is what renders `Edited`; an empty save clears the caption of a row
                     // that keeps an attachment (the package refuses it for text-only rows).
-                    editingMessage = editingMessage,
-                    onEditMessage = { editingMessage = it },
+                    editingMessage = room.editingMessage,
+                    onEditMessage = { room = room.startEditing(it) },
                     onSaveEdit = { message, text, complete ->
-                        messages = messages.map { row ->
-                            if (row.id == message.id) row.copy(text = text.ifEmpty { null }, revision = row.revision + 1) else row
-                        }
-                        editingMessage = null
+                        room = room.saveEdit(message, text)
                         complete(true)
                     },
-                    onCancelEdit = { editingMessage = null },
+                    onCancelEdit = { room = room.cancelEditing() },
                     onDeleteMessage = { message, complete ->
-                        messages = messages.filterNot { it.id == message.id }
-                        if (editingMessage?.id == message.id) editingMessage = null
+                        room = room.delete(message)
                         complete(true)
                     },
+                    // Replying and jumping are the same kind of pure function of props (0.9.0).
+                    // Every row the session may quote offers `Reply`, which sets `replyTarget` and
+                    // raises the cancellable strip above the composer; a row whose
+                    // `replyToMessageId` is set renders a quoted block from
+                    // `replyPreviewByMessageId` and activates `onJumpToMessage`. `m3` quotes a row
+                    // outside the loaded window, so activating its quote replaces the window with
+                    // a slice centred on the target, highlights it and offers `Jump to latest`
+                    // back; deleting a quoted row leaves the reference and degrades the quote.
+                    replyTarget = room.replyTarget,
+                    onReplyToMessage = { room = room.startReplying(it) },
+                    onCancelReply = { room = room.cancelReplying() },
+                    replyPreviewByMessageId = room.replyPreviews,
+                    onJumpToMessage = { room = room.jumpTo(it) },
+                    highlightedMessageId = room.highlightedMessageId,
+                    hasNewerMessages = room.hasNewerMessages,
+                    onLoadNewer = if (room.windowMode == ConvoKitWindowMode.JUMPED) ({ room = room.loadNewer() }) else null,
+                    onReturnToLatest = if (room.windowMode == ConvoKitWindowMode.JUMPED) ({ room = room.returnToLatest() }) else null,
+                    scrollTarget = room.scrollTarget,
+                    suppressPagination = room.suppressPagination,
+                    onScrollTargetHandled = { room = room.scrollHandled() },
                     readAtByUserId = mapOf("alex" to showcaseInstant(40)),
                     typingUserIds = if (variant == ShowcaseVariant.STANDARD) setOf("alex") else emptySet(),
-                    displayNameForUser = { id -> if (id == "alex") "Alex Rivera" else id },
+                    displayNameForUser = ::showcaseDisplayName,
                     reverseMessages = true,
                     messageContentPadding = PaddingValues(
                         horizontal = if (variant == ShowcaseVariant.COMPACT) 10.dp else 14.dp,
@@ -188,6 +220,7 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
                     ),
                     headerContent = customHeader,
                     messageItem = customMessage,
+                    messageItemScope = scopedMessage,
                     mediaContent = if (variant == ShowcaseVariant.BRANDED) {
                         { media, message, _, fallback ->
                             Surface(color = Color(0xFFF5F0FF), shape = RoundedCornerShape(12.dp)) {
@@ -203,6 +236,8 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
                             // The slot keeps its five parameters: `send` already saves while a
                             // message is being edited, and the host passes its own edit state on
                             // so the branded composer reads `Save` and allows an empty caption.
+                            // The cancellable reply strip needs nothing here either: the view
+                            // draws it above whichever composer is in the slot.
                             Surface(color = Color(0xFFF8F5FF)) {
                                 DefaultComposer(
                                     text,
@@ -210,8 +245,8 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
                                     sending,
                                     send,
                                     attachment,
-                                    editing = editingMessage != null,
-                                    allowEmpty = editingMessage?.media?.isNotEmpty() == true,
+                                    editing = room.editingMessage != null,
+                                    allowEmpty = room.editingMessage?.media?.isNotEmpty() == true,
                                 )
                             }
                         }
@@ -292,6 +327,10 @@ private fun BrandedConversationItem(conversation: Conversation, summary: InboxSu
  * derives the edited state from `Message.isEdited` (`revision > 0`) itself; the package's
  * long-press actions belong to its default row, and a custom row supplies its own affordance
  * (through `onController` in an SDK-backed host).
+ *
+ * This row is unchanged in 0.9.0: the slot's arity is frozen for ever, so a host never has to
+ * migrate. A row that wants the reply members takes `messageItemScope` instead, which the Quoted
+ * tab shows.
  */
 @Composable
 private fun CompactMessage(message: Message, mine: Boolean, sender: String?, readerCount: Int) {
@@ -330,16 +369,146 @@ private fun CompactMessage(message: Message, mine: Boolean, sender: String?, rea
     }
 }
 
+/**
+ * A complete row replacement through the 0.9.0 `messageItemScope` slot.
+ * [ConvoKitMessageItemScope] carries the five arguments of the frozen `messageItem` lambda
+ * unchanged (`message`, `chronologicalIndex`, `isCurrentUser`, `sender`, `readerIds`) plus the
+ * reply members, so this row renders its own quoted block from `replyPreview`, offers `Reply`
+ * while `canReply` holds, activates `jumpToReplyTarget`, and tints the row a jump just landed on
+ * from `isHighlighted`. A custom row never repeats the eligibility rule: `reply` is already null
+ * for a pending row and for a read-only session, and `jumpToReplyTarget` only for a row that
+ * quotes nothing.
+ */
+@Composable
+private fun QuotedMessage(scope: ConvoKitMessageItemScope) {
+    val mine = scope.isCurrentUser
+    val bubble = when {
+        scope.isHighlighted -> Color(0xFFFFE3A3)
+        mine -> Color(0xFF2F3B63)
+        else -> Color(0xFFE9ECF6)
+    }
+    val content = if (mine && !scope.isHighlighted) Color.White else Color(0xFF1B2138)
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+    ) {
+        Surface(color = bubble, contentColor = content, shape = RoundedCornerShape(11.dp)) {
+            Column(Modifier.padding(horizontal = 11.dp, vertical = 8.dp).fillMaxWidth(0.88f)) {
+                if (!mine) {
+                    Text(
+                        scope.sender?.name ?: scope.message.senderId,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                if (scope.isReply) {
+                    QuotedBlock(scope.replyPreview, scope.jumpToReplyTarget, content)
+                    Spacer(Modifier.height(5.dp))
+                }
+                scope.message.text?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                scope.message.media.forEach { media -> DefaultMediaBlock(media, scope.message) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (mine) {
+                        Text(
+                            if (scope.message.isConvoKitPending) {
+                                "SENDING…"
+                            } else if (scope.readerIds.isEmpty()) {
+                                "SENT"
+                            } else {
+                                "READ"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = content.copy(alpha = 0.7f),
+                        )
+                    }
+                    if (scope.message.isEdited) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "EDITED",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = content.copy(alpha = 0.7f),
+                            modifier = Modifier.semantics { contentDescription = "Edited" },
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    scope.reply?.let { reply ->
+                        TextButton(
+                            onClick = reply,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        ) {
+                            Text("Reply", style = MaterialTheme.typography.labelSmall, color = content)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The quoted block a custom row draws for itself. Three branches and no fourth: a resolved
+ * preview, the terminal `Original message unavailable` copy, and a reference the host has not
+ * resolved yet, which shows the block without quoted text rather than claiming the message is
+ * gone. `ReplyPreview.senderId` is the quoted author, the identity `Message.senderId` also
+ * carries, so the same resolver names both.
+ */
+@Composable
+private fun QuotedBlock(preview: ConvoKitReplyPreview?, onActivate: (() -> Unit)?, content: Color) {
+    val base = Modifier.fillMaxWidth().semantics { contentDescription = "Quoted message" }
+    Surface(
+        modifier = if (onActivate == null) base else base.clickable(onClickLabel = "Go to quoted message", onClick = onActivate),
+        color = content.copy(alpha = 0.10f),
+        contentColor = content,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(Modifier.padding(vertical = 5.dp).padding(start = 7.dp, end = 9.dp)) {
+            Box(Modifier.width(3.dp).height(26.dp).background(content.copy(alpha = 0.5f), RoundedCornerShape(2.dp)))
+            Spacer(Modifier.width(7.dp))
+            Column(Modifier.weight(1f)) {
+                val resolved = (preview as? ConvoKitReplyPreview.Resolved)?.preview
+                if (resolved != null) {
+                    Text(
+                        showcaseDisplayName(resolved.senderId),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        resolved.text?.takeIf(String::isNotBlank)?.let { if (resolved.textTruncated) "$it…" else it }
+                            ?: "Attachment",
+                        color = content.copy(alpha = 0.78f),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else if (preview === ConvoKitReplyPreview.Unavailable) {
+                    Text(
+                        "Original message unavailable",
+                        color = content.copy(alpha = 0.78f),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The room's display names, used for message authors and for quoted authors alike. */
+private fun showcaseDisplayName(id: String): String = if (id == "alex") "Alex Rivera" else id
+
 private fun specFor(variant: ShowcaseVariant): ShowcaseSpec = when (variant) {
     ShowcaseVariant.STANDARD -> ShowcaseSpec(
         title = "Standard components",
-        description = "Material 3 defaults with inbox previews, unread badges and the mark-unread dot, media, read receipts, typing state, pagination, a text composer, and long-press edit and delete actions on your own messages.",
-        props = listOf("defaults", "unread badges", "media"),
+        description = "Material 3 defaults with inbox previews, unread badges and the mark-unread dot, media, read receipts, typing state, pagination, a text composer, and long-press reply, edit and delete actions.",
+        props = listOf("defaults", "unread badges", "quoted replies"),
         colors = ConvoKitUiColors.light(),
     )
     ShowcaseVariant.BRANDED -> ShowcaseSpec(
         title = "Branded support",
-        description = "The same components configured through color tokens and targeted content slots.",
+        description = "The same components configured through color tokens, including the jump highlight, and targeted content slots.",
         props = listOf("theme tokens", "inbox slot", "media slot"),
         colors = ConvoKitUiColors.light().copy(
             primary = Color(0xFF68479D),
@@ -347,11 +516,23 @@ private fun specFor(variant: ShowcaseVariant): ShowcaseSpec = when (variant) {
             readReceipt = Color(0xFFE0D0FF),
             background = Color(0xFFF5F1FA),
             badge = Color(0xFF68479D),
+            highlight = Color(0xFF68479D).copy(alpha = 0.24f),
+        ),
+    )
+    ShowcaseVariant.QUOTED -> ShowcaseSpec(
+        title = "Quoted replies",
+        description = "A full row replacement through the message scope, which carries the frozen slot's five arguments plus the quoted preview, the reply action, the jump target and the highlight.",
+        props = listOf("message scope", "quoted block", "jump target"),
+        colors = ConvoKitUiColors.light().copy(
+            primary = Color(0xFF2F3B63),
+            outgoingBubble = Color(0xFF2F3B63),
+            badge = Color(0xFF2F3B63),
+            background = Color(0xFFF2F4FA),
         ),
     )
     ShowcaseVariant.COMPACT -> ShowcaseSpec(
         title = "Compact operations",
-        description = "Dense list spacing and a full message-row replacement for operational workflows.",
+        description = "Dense list spacing and a full message-row replacement, through the frozen five-parameter slot, for operational workflows.",
         props = listOf("compact sizing", "message slot", "custom rows"),
         colors = ConvoKitUiColors.light().copy(
             primary = Color(0xFF284A40),

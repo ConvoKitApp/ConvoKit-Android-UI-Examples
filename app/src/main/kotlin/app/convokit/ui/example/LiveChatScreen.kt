@@ -99,8 +99,9 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
                 Text(
                     "Room joining remains an application/backend concern; the reusable UI starts after the core SDK is connected. " +
                         "The joined room then appears in the SDK-backed inbox with its preview and unread badge, " +
-                        "and its row menu can mark it unread again. Inside the room, long-press one of your own messages " +
-                        "to edit or delete it.",
+                        "and its row menu can mark it unread again. Inside the room, long-press a message to reply to it, " +
+                        "or one of your own to edit or delete it, and activate a quoted block to go to the message it " +
+                        "points at.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 OutlinedTextField(
@@ -212,6 +213,9 @@ internal fun LiveChatScreen(systemPadding: PaddingValues) {
             // The package's default rows and composer carry the 0.8.0 edit and delete surface: own
             // confirmed rows offer a long-press menu while the session's role allows it, deletes
             // confirm through the built-in dialog, and the composer saves with the snapshot revision.
+            // They carry the 0.9.0 reply surface the same way, and the SDK-backed component owns
+            // the rest of it: the batched quoted previews, the jumped window and its way back to
+            // the latest all come from the controller, so the live example binds nothing new.
             ConvoKitConversation(
                 client = activeClient,
                 conversationId = activeRoom,

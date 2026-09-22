@@ -19,10 +19,35 @@ internal val showcaseConversations = listOf(
     conversation("launch", "Launch room", "Release coordination", 18, "sam" to "Sam Patel", "alex" to "Alex Rivera"),
 )
 
+/** How many rows one loaded window holds; the rest of [showcaseHistory] stays out of view. */
+internal const val showcaseWindowSize = 6
+
 /**
- * The room's history. Every row carries the core's `revision` (0 on creation, +1 per edit);
+ * Room history older than the loaded window. A store holds one contiguous window anchored at the
+ * newest message, so these rows are not rendered until something asks for them: `m3` quotes `a2`,
+ * which is what makes activating that quote a real jump out of the window rather than a scroll.
+ */
+internal val showcaseArchive = listOf(
+    message("a1", "alex", "Kicking off this week's component review.", 4),
+    message("a2", currentUserId, "Here is the audit of the empty states we still owe.", 6),
+    message("a3", "alex", "Thanks, I will take the first two.", 8),
+    message("a4", currentUserId, "Splitting the rest with Jordan.", 10),
+    message("a5", "alex", "Jordan is out until Thursday.", 12),
+    message("a6", currentUserId, "Then we ship the first two and revisit.", 14),
+)
+
+/**
+ * The loaded window. Every row carries the core's `revision` (0 on creation, +1 per edit);
  * `m2` is Maya's own edited row (`revision` 1), so the default row and the compact custom row
  * both show `Edited`, and its attachment keeps `Save` enabled while the caption is cleared.
+ *
+ * Four rows carry a `replyToMessageId`, between them covering every render branch of the quoted
+ * block and both sources a resolved preview comes from: `m2` quotes `m1`, which is loaded, so its
+ * preview is derived from the window and costs nothing; `m3` quotes `a2`, which is not loaded, so
+ * activating its quote is a real jump out of the window; `m5` quotes `a6`, which
+ * [showcaseUnresolvedParentIds] withholds, so it renders the bare reference with no quoted text;
+ * and `m6` quotes `m0`, which was deleted, so it shows `Original message unavailable` and keeps
+ * the reference. An edit never moves a reference: `m2` is still a reply to `m1` after it is saved.
  */
 internal val showcaseMessages = listOf(
     message("m1", "alex", "The updated empty state is ready for review.", 22),
@@ -33,8 +58,9 @@ internal val showcaseMessages = listOf(
         24,
         listOf(ContactMedia(name = "Jordan Lee", email = "jordan@example.com")),
         revision = 1,
+        replyToMessageId = "m1",
     ),
-    message("m3", "alex", "Perfect—adding it to the release notes.", 26),
+    message("m3", "alex", "Perfect—adding it to the release notes.", 26, replyToMessageId = "a2"),
     message(
         "m4",
         currentUserId,
@@ -48,6 +74,7 @@ internal val showcaseMessages = listOf(
         "Here is the final component preview.",
         30,
         listOf(ImageMedia(url = "fixture://convokit", name = "component-preview.png", size = 48_200)),
+        replyToMessageId = "a6",
     ),
     message(
         "m6",
@@ -55,8 +82,22 @@ internal val showcaseMessages = listOf(
         "The signed-off handoff is attached.",
         32,
         listOf(FileMedia(url = "fixture://handoff", name = "handoff.pdf", size = 834_220)),
+        replyToMessageId = "m0",
     ),
 )
+
+/** Everything the room holds, oldest first: the archive followed by the loaded window. */
+internal val showcaseHistory = showcaseArchive + showcaseMessages
+
+/**
+ * Parents the fixture deliberately answers nothing for, so one rendered reply stays in the third
+ * state of `replyPreviewByMessageId`: a **missing key**, "not yet resolved". It stands in for an
+ * id a batched `getReplyPreviews` has not come back for yet — and, against an older backend, one
+ * it never will. The reference and the jump affordance stay; only the quoted text is absent, so
+ * the row never claims the message is gone. Deleting such a parent resolves it to the terminal
+ * `Unavailable`, which is the one explicit signal that outranks the withholding.
+ */
+internal val showcaseUnresolvedParentIds: Set<String> = setOf("a6")
 
 /**
  * The inbox state a `listInbox` page would carry for [showcaseConversations]: the default row
@@ -133,6 +174,7 @@ internal fun message(
     media: List<app.convokit.sdk.MessageMedia> = emptyList(),
     conversationId: String = "design",
     revision: Int = 0,
+    replyToMessageId: String? = null,
 ): Message = Message(
     id = id,
     conversationId = conversationId,
@@ -142,6 +184,7 @@ internal fun message(
     createdAt = showcaseInstant(minute),
     updatedAt = null,
     revision = revision,
+    replyToMessageId = replyToMessageId,
 )
 
 internal fun showcaseInstant(minute: Int): Instant =
