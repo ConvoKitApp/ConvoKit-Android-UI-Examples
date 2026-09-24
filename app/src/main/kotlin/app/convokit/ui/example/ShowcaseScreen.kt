@@ -39,12 +39,17 @@ import androidx.compose.ui.unit.dp
 import app.convokit.sdk.Conversation
 import app.convokit.sdk.InboxSummary
 import app.convokit.sdk.Message
+import app.convokit.sdk.MessageReactionSummary
+import app.convokit.sdk.ReactionSummary
+import app.convokit.sdk.ReactionUser
+import app.convokit.sdk.ReactionUsersPage
 import app.convokit.ui.ConvoKitReplyPreview
 import app.convokit.ui.ConvoKitWindowMode
 import app.convokit.ui.components.ConvoKitConversationListView
 import app.convokit.ui.components.ConvoKitConversationView
 import app.convokit.ui.components.ConvoKitImageLoader
 import app.convokit.ui.components.ConvoKitMessageItemScope
+import app.convokit.ui.components.ConvoKitReactionBar
 import app.convokit.ui.components.ConversationHeaderContent
 import app.convokit.ui.components.DefaultComposer
 import app.convokit.ui.components.DefaultMediaBlock
@@ -83,6 +88,13 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
     // is set the package shows the banner, prefills the composer silently and routes the one
     // submit handed to the default and custom composers to `onSaveEdit` instead of `onSendMessage`.
     var room by remember(variant) { mutableStateOf(ShowcaseRoom()) }
+    var reactionSummaries by remember(variant) { mutableStateOf<Map<String, MessageReactionSummary>>(mapOf(
+        showcaseMessages.last().id to MessageReactionSummary(
+            showcaseMessages.last().id,
+            listOf(ReactionSummary("❤️", 2, false)),
+            false,
+        ),
+    )) }
     // The highlight belongs to whoever owns the state, so a controlled host clears it itself; the
     // package's own controller clears its own after about two seconds.
     LaunchedEffect(room.highlightedMessageId) {
@@ -202,6 +214,27 @@ internal fun ShowcaseScreen(variant: ShowcaseVariant, systemPadding: PaddingValu
                     onReplyToMessage = { room = room.startReplying(it) },
                     onCancelReply = { room = room.cancelReplying() },
                     replyPreviewByMessageId = room.replyPreviews,
+                    reactionSummaries = reactionSummaries,
+                    onToggleReaction = { message, emoji ->
+                        val previous = reactionSummaries[message.id]?.reactions.orEmpty()
+                        val found = previous.find { it.emoji == emoji }
+                        val count = (found?.count ?: 0) + if (found?.reactedByMe == true) -1 else 1
+                        val updated = previous.filterNot { it.emoji == emoji } +
+                            if (count > 0) listOf(ReactionSummary(emoji, count, found?.reactedByMe != true)) else emptyList()
+                        reactionSummaries = reactionSummaries + (message.id to MessageReactionSummary(message.id, updated, false))
+                        true
+                    },
+                    onListReactionUsers = { message, emoji, cursor ->
+                        ReactionUsersPage(
+                            if (cursor != null) emptyList() else buildList {
+                                if (reactionSummaries[message.id]?.reactions?.any { it.emoji == emoji && it.reactedByMe } == true) {
+                                    add(ReactionUser(currentUserId, "Maya", null, showcaseInstant(40)))
+                                }
+                                add(ReactionUser("alex", "Alex", null, showcaseInstant(40)))
+                            },
+                            null,
+                        )
+                    },
                     onJumpToMessage = { room = room.jumpTo(it) },
                     highlightedMessageId = room.highlightedMessageId,
                     hasNewerMessages = room.hasNewerMessages,
@@ -407,6 +440,9 @@ private fun QuotedMessage(scope: ConvoKitMessageItemScope) {
                 }
                 scope.message.text?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 scope.message.media.forEach { media -> DefaultMediaBlock(media, scope.message) }
+                scope.listReactionUsers?.let { listUsers ->
+                    ConvoKitReactionBar(scope.reactionSummary, scope.toggleReaction, listUsers)
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (mine) {
                         Text(
