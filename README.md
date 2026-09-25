@@ -39,7 +39,7 @@ The app includes five navigable examples:
   default rows and composer reply to any message, edit and delete the user's
   own, and go to a quoted message wherever it is in the history.
 
-The 0.10.0 showcase seeds a reaction chip, lets Maya toggle an emoji, and opens
+The 0.10.1 showcase seeds a reaction chip, lets Maya toggle an emoji, and opens
 the reactor list. The Quoted screen renders the same controls in its custom
 message row with `ConvoKitReactionBar`; Live uses the SDK-backed defaults.
 
@@ -88,7 +88,7 @@ dependencyResolutionManagement {
 }
 
 dependencies {
-    implementation("app.convokit:convokit-android-ui:0.10.0")
+    implementation("app.convokit:convokit-android-ui:0.10.1")
 }
 ```
 
